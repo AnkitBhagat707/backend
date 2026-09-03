@@ -1,31 +1,36 @@
-const Block = require("./Block");
 const TrustBlock = require("../models/TrustBlock");
 
 class Blockchain {
   constructor() {
     this.chain = [];
+    this.addBlockQueue = Promise.resolve();
   }
 
   // Initialize blockchain: load from DB or create genesis
   async initialize() {
-    const existingBlocks = await TrustBlock.find().sort({ index: 1 });
+    const existingBlocks = await TrustBlock.find().sort({
+      index: 1,
+      _id: 1,
+    });
 
     if (existingBlocks.length === 0) {
-      // Create Genesis Block
       const genesis = new TrustBlock({
         index: 0,
         timestamp: Date.now(),
         data: "Genesis Block",
-        previousHash: "0"
+        previousHash: "0",
       });
 
       genesis.hash = genesis.calculateHash();
+
       await genesis.save();
 
-      this.chain = [genesis];   // <-- Important fix
+      this.chain = [genesis];
+
       console.log("🌱 Genesis block created.");
     } else {
       this.chain = existingBlocks;
+
       console.log("📚 Blockchain loaded from DB.");
     }
   }
@@ -35,23 +40,42 @@ class Blockchain {
   }
 
   async addBlock(data) {
-    const previousBlock = this.getLatestBlock();
+    const operation = this.addBlockQueue.then(() =>
+      this.createBlock(data)
+    );
+
+    this.addBlockQueue = operation.catch(() => {});
+
+    return operation;
+  }
+
+  async createBlock(data) {
+    const previousBlock = await TrustBlock.findOne().sort({
+      index: -1,
+      _id: -1,
+    });
 
     if (!previousBlock) {
-      throw new Error("❌ No genesis block found. Initialize chain first.");
+      throw new Error(
+        "❌ No genesis block found. Initialize chain first."
+      );
     }
 
     const newBlock = new TrustBlock({
-      index: this.chain.length,
+      index: previousBlock.index + 1,
       timestamp: Date.now(),
       data,
-      previousHash: previousBlock.hash
+      previousHash: previousBlock.hash,
     });
 
     newBlock.hash = newBlock.calculateHash();
 
     await newBlock.save();
-    this.chain.push(newBlock);
+
+    this.chain = await TrustBlock.find().sort({
+      index: 1,
+      _id: 1,
+    });
 
     return newBlock;
   }
